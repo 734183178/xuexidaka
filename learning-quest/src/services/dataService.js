@@ -295,11 +295,19 @@ export const subscriptionService = {
     if (codeError) throw codeError;
 
     if (!codeRecord) {
-      throw new Error('兑换码不存在');
+      return {
+        success: false,
+        message: '兑换码不存在，请检查后重试',
+        code: null
+      };
     }
 
     if (codeRecord.is_used) {
-      throw new Error('该兑换码已被使用');
+      return {
+        success: false,
+        message: '该兑换码已被使用',
+        code: null
+      };
     }
 
     // 2. 获取用户当前订阅状态
