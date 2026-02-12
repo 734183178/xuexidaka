@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { dataService } from '../services/dataService';
-import { Calendar, Plus, Gift, Play, Check, Clock, Upload, Mic, Edit2, X, Trophy, Target, BarChart3, ChevronLeft, ChevronRight, Zap, Award, Star, LogOut, User, ChevronDown, Pause, RotateCcw, Coffee, Timer, Settings, Lightbulb, ChevronUp } from 'lucide-react';
+import { dataService, subscriptionService } from '../services/dataService';
+import { Calendar, Plus, Gift, Play, Check, Clock, Upload, Mic, Edit2, X, Trophy, Target, BarChart3, ChevronLeft, ChevronRight, Zap, Award, Star, LogOut, User, ChevronDown, Pause, RotateCcw, Coffee, Timer, Settings, Lightbulb, ChevronUp, Crown, Lock, Sparkles, ExternalLink, List, CheckCircle, Image as ImageIcon, UserPlus, CheckCircle2 } from 'lucide-react';
+import MembershipStatus from './MembershipStatus';
+import RedeemCodeModal from './RedeemCodeModal';
+import MembershipLockModal from './MembershipLockModal';
 
-export default function LearningQuest({ user, onLogout }) {
+export default function LearningQuest({ user, userList = [], onLogout, onAddUser, onSwitchUser }) {
   const [data, setData] = useState({
     tasks: [],
     completionRecords: [],
@@ -19,6 +22,15 @@ export default function LearningQuest({ user, onLogout }) {
   const [userProfile, setUserProfile] = useState(null);
   const menuRef = useRef(null);
 
+  // 会员相关状态
+  const [membershipInfo, setMembershipInfo] = useState(null);
+  const [showRedeemModal, setShowRedeemModal] = useState(false);
+  const [showLockModal, setShowLockModal] = useState(false);
+
+  // 完成会话相关状态
+  const [showCompleteSession, setShowCompleteSession] = useState(false);
+  const [sessionData, setSessionData] = useState(null);
+
   // 从 Supabase 加载数据
   useEffect(() => {
     loadAllData();
@@ -27,15 +39,17 @@ export default function LearningQuest({ user, onLogout }) {
   const loadAllData = async () => {
     try {
       setLoading(true);
-      const [profile, tasks, records, rewards, redemptions] = await Promise.all([
+      const [profile, tasks, records, rewards, redemptions, membershipDisplay] = await Promise.all([
         dataService.getUserProfile(user.id),
         dataService.getTasks(user.id),
         dataService.getCompletionRecords(user.id),
         dataService.getRewards(user.id),
         dataService.getRedemptionRecords(user.id),
+        subscriptionService.getMembershipDisplayInfo(user.id),
       ]);
 
       setUserProfile(profile);
+      setMembershipInfo(membershipDisplay);
       setData({
         tasks: tasks || [],
         completionRecords: records || [],
@@ -228,11 +242,50 @@ export default function LearningQuest({ user, onLogout }) {
     setShowModal('timer'); // 打开计时器模态框
   };
 
-  const completeWithTimer = (proof, actualMinutes) => {
+  // 显示完成会话弹窗（从计时器点击完成后）
+  const completeWithTimer = (proof, actualMinutes, duration) => {
     const task = modalData.task;
     const minutes = actualMinutes || 30;
-    completeTask(task, minutes, proof);
-    setShowModal(null);
+    // 保存会话数据并显示完成会话弹窗
+    setSessionData({
+      task,
+      proof,
+      minutes,
+      duration
+    });
+    setShowModal(null); // 关闭计时器弹窗
+    setShowCompleteSession(true); // 显示完成会话弹窗
+  };
+
+  // 确认完成会话
+  const confirmCompleteSession = (data) => {
+    if (sessionData) {
+      // 构建证明数据
+      // 如果有上传图片，使用第一张作为主证明
+      // 笔记存储在 proof_notes 字段中
+      let proof = sessionData.proof || {};
+
+      if (data.images && data.images.length > 0) {
+        proof = {
+          type: 'photo',
+          data: data.images[0], // 使用第一张图片作为主证明
+          fileName: data.imageNames?.[0] || 'image.jpg',
+          notes: data.notes, // 笔记
+          allImages: data.images, // 所有图片
+          allImageNames: data.imageNames,
+        };
+      } else if (data.notes) {
+        // 只有笔记，没有图片
+        proof = {
+          ...proof,
+          notes: data.notes,
+        };
+      }
+
+      completeTask(sessionData.task, sessionData.minutes, proof);
+    }
+    setShowCompleteSession(false);
+    setSessionData(null);
   };
 
   const quickComplete = (task, minutes, proof) => {
@@ -277,6 +330,14 @@ export default function LearningQuest({ user, onLogout }) {
   // 兑换奖励（调用 Supabase）
   const redeemReward = async (reward) => {
     if (data.totalPoints < reward.points) return;
+
+    // 检查会员状态
+    const membership = await subscriptionService.checkMembership(user.id);
+    if (!membership.isValid) {
+      setShowModal(null);
+      setShowLockModal(true);
+      return;
+    }
 
     try {
       const newRedemption = await dataService.addRedemptionRecord(user.id, {
@@ -350,23 +411,69 @@ export default function LearningQuest({ user, onLogout }) {
               <div className="w-7 h-7 sm:w-8 sm:h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center">
                 <User className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
               </div>
-              <span className="text-gray-800 hidden sm:inline">{userProfile?.username || '用户'}</span>
+              {/* 会员图标：永久会员紫色皇冠，年费会员金色皇冠，其他（试用/非会员）黄色五角星 */}
+              {membershipInfo?.label?.includes('永久') ? (
+                <Crown className="w-4 h-4 sm:w-5 sm:h-5 text-purple-500" />
+              ) : membershipInfo?.label?.includes('年费') ? (
+                <Crown className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-500" />
+              ) : (
+                <Star className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-400 fill-yellow-400" />
+              )}
+              <span className="text-gray-800 hidden sm:inline truncate max-w-[120px] lg:max-w-[180px]">{user?.email || '用户'}</span>
               <ChevronDown className={`w-4 h-4 text-gray-600 transition-transform ${showUserMenu ? 'rotate-180' : ''}`} />
             </button>
 
             {/* 下拉菜单 */}
             {showUserMenu && (
-              <div className="absolute right-0 top-full mt-2 w-44 sm:w-48 bg-white rounded-xl shadow-xl border border-gray-200 py-2 z-50 animate-fadeIn">
-                <div className="px-3 sm:px-4 py-2 border-b border-gray-100">
-                  <div className="text-xs sm:text-sm text-gray-600">邮箱</div>
-                  <div className="text-xs sm:text-sm font-medium text-gray-800 truncate">{user?.email}</div>
-                </div>
+              <div className="absolute right-0 top-full mt-2 w-52 sm:w-56 bg-white rounded-xl shadow-xl border border-gray-200 py-2 z-50 animate-fadeIn">
+                {/* 用户列表 */}
+                {userList.length > 1 && (
+                  <div className="border-b border-gray-100 pb-2 mb-2">
+                    <div className="px-3 sm:px-4 py-1.5 text-xs text-gray-400">账号列表</div>
+                    {userList.map((u) => (
+                      <button
+                        key={u.id}
+                        onClick={() => {
+                          setShowUserMenu(false);
+                          if (u.id !== user?.id) {
+                            onSwitchUser(u);
+                          }
+                        }}
+                        className={`w-full px-3 sm:px-4 py-2 text-left hover:bg-gray-50 transition-colors flex items-center gap-2 text-sm ${
+                          u.id === user?.id ? 'bg-indigo-50' : ''
+                        }`}
+                      >
+                        <div className="w-6 h-6 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
+                          <User className="w-3 h-3 text-white" />
+                        </div>
+                        <span className="text-gray-700 truncate flex-1">{u.email}</span>
+                        {u.id === user?.id && (
+                          <CheckCircle2 className="w-4 h-4 text-indigo-600 flex-shrink-0" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* 添加新用户 */}
+                <button
+                  onClick={() => {
+                    setShowUserMenu(false);
+                    onAddUser();
+                  }}
+                  className="w-full px-3 sm:px-4 py-2.5 text-left hover:bg-gray-50 transition-colors flex items-center gap-2 text-gray-700 text-sm sm:text-base"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>添加新用户</span>
+                </button>
+
+                {/* 退出登录 */}
                 <button
                   onClick={() => {
                     setShowUserMenu(false);
                     onLogout();
                   }}
-                  className="w-full px-3 sm:px-4 py-2.5 text-left hover:bg-gray-100 transition-colors flex items-center gap-2 text-red-600 text-sm sm:text-base"
+                  className="w-full px-3 sm:px-4 py-2.5 text-left hover:bg-gray-50 transition-colors flex items-center gap-2 text-red-600 text-sm sm:text-base"
                 >
                   <LogOut className="w-4 h-4" />
                   <span>退出登录</span>
@@ -389,26 +496,26 @@ export default function LearningQuest({ user, onLogout }) {
                 </h2>
               </div>
 
-              {/* 移动端：2列，平板：3列，桌面：5列 */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3 mb-3">
-                <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg sm:rounded-xl p-2.5 sm:p-3 border-2 border-blue-200">
-                  <div className="flex items-center gap-1.5 sm:gap-2 mb-0.5 sm:mb-1">
+              {/* 移动端：2列，平板：3列，桌面：6列 */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3 mb-3">
+                <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg sm:rounded-xl p-2.5 sm:p-3 border-2 border-blue-200 text-center">
+                  <div className="flex items-center justify-center gap-1.5 sm:gap-2 mb-0.5 sm:mb-1">
                     <Target className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600" />
                     <div className="text-[10px] sm:text-xs text-blue-700 font-medium">完成情况</div>
                   </div>
                   <div className="text-lg sm:text-2xl font-bold text-blue-600">{stats.completed}/{stats.total}</div>
                 </div>
 
-                <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg sm:rounded-xl p-2.5 sm:p-3 border-2 border-purple-200">
-                  <div className="flex items-center gap-1.5 sm:gap-2 mb-0.5 sm:mb-1">
+                <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg sm:rounded-xl p-2.5 sm:p-3 border-2 border-purple-200 text-center">
+                  <div className="flex items-center justify-center gap-1.5 sm:gap-2 mb-0.5 sm:mb-1">
                     <Award className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-purple-600" />
                     <div className="text-[10px] sm:text-xs text-purple-700 font-medium">完成率</div>
                   </div>
                   <div className="text-lg sm:text-2xl font-bold text-purple-600">{stats.completionRate}%</div>
                 </div>
 
-                <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg sm:rounded-xl p-2.5 sm:p-3 border-2 border-orange-200">
-                  <div className="flex items-center gap-1.5 sm:gap-2 mb-0.5 sm:mb-1">
+                <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg sm:rounded-xl p-2.5 sm:p-3 border-2 border-orange-200 text-center">
+                  <div className="flex items-center justify-center gap-1.5 sm:gap-2 mb-0.5 sm:mb-1">
                     <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-orange-600" />
                     <div className="text-[10px] sm:text-xs text-orange-700 font-medium">用时</div>
                   </div>
@@ -417,8 +524,8 @@ export default function LearningQuest({ user, onLogout }) {
                   </div>
                 </div>
 
-                <div className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-lg sm:rounded-xl p-2.5 sm:p-3 border-2 border-indigo-300">
-                  <div className="flex items-center gap-1.5 sm:gap-2 mb-0.5 sm:mb-1">
+                <div className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-lg sm:rounded-xl p-2.5 sm:p-3 border-2 border-indigo-300 text-center">
+                  <div className="flex items-center justify-center gap-1.5 sm:gap-2 mb-0.5 sm:mb-1">
                     <Trophy className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     <div className="text-[10px] sm:text-xs opacity-90 font-medium">当前积分</div>
                   </div>
@@ -426,13 +533,31 @@ export default function LearningQuest({ user, onLogout }) {
                 </div>
 
                 <button
+                  onClick={() => setCurrentPage('totalPlan')}
+                  className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-lg sm:rounded-xl p-2.5 sm:p-3 border-2 border-blue-300 hover:shadow-lg transition-all flex items-center justify-center gap-1.5"
+                >
+                  <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5" />
+                  <div className="text-sm sm:text-base font-medium">计划汇总</div>
+                </button>
+
+                <button
                   onClick={() => setCurrentPage('rewards')}
-                  className="col-span-2 sm:col-span-1 bg-gradient-to-r from-pink-500 to-purple-600 text-white rounded-lg sm:rounded-xl p-2.5 sm:p-3 border-2 border-pink-300 hover:shadow-lg transition-all flex items-center justify-center gap-1.5 sm:flex-col sm:items-center sm:justify-center sm:gap-1"
+                  className="bg-gradient-to-r from-pink-500 to-purple-600 text-white rounded-lg sm:rounded-xl p-2.5 sm:p-3 border-2 border-pink-300 hover:shadow-lg transition-all flex items-center justify-center gap-1.5"
                 >
                   <Gift className="w-4 h-4 sm:w-5 sm:h-5" />
-                  <div className="text-xs sm:text-sm font-medium">奖励商店</div>
+                  <div className="text-sm sm:text-base font-medium">奖励商店</div>
                 </button>
               </div>
+
+              {/* 会员状态 - 单独一行，试用期结束后不显示 */}
+              {membershipInfo && membershipInfo.status !== 'expired' && (
+                <div className="mb-3">
+                  <MembershipStatus
+                    membershipInfo={membershipInfo}
+                    onRedeemCode={() => setShowRedeemModal(true)}
+                  />
+                </div>
+              )}
 
               <div className="bg-gradient-to-r from-pink-50 to-purple-50 rounded-lg sm:rounded-xl p-2 sm:p-2.5 border-2 border-pink-200">
                 <div className="flex items-center justify-between">
@@ -552,12 +677,24 @@ export default function LearningQuest({ user, onLogout }) {
             rewards={data.rewards}
             totalPoints={data.totalPoints}
             redemptionRecords={data.redemptionRecords}
+            membershipInfo={membershipInfo}
             onRedeem={(reward) => {
               setModalData({ reward });
               setShowModal('redeem');
             }}
             onAddReward={() => setShowModal('addReward')}
             onBack={() => setCurrentPage('home')}
+            onRedeemCode={() => setShowRedeemModal(true)}
+          />
+        )}
+
+        {currentPage === 'totalPlan' && (
+          <TotalPlanPreview
+            tasks={data.tasks}
+            completionRecords={data.completionRecords}
+            membershipInfo={membershipInfo}
+            onBack={() => setCurrentPage('home')}
+            onRedeemCode={() => setShowRedeemModal(true)}
           />
         )}
       </div>
@@ -598,6 +735,37 @@ export default function LearningQuest({ user, onLogout }) {
 
       {showModal === 'addReward' && (
         <AddRewardModal onClose={() => setShowModal(null)} onAdd={addReward} />
+      )}
+
+      {/* 会员相关模态框 */}
+      {showRedeemModal && (
+        <RedeemCodeModal
+          userId={user.id}
+          onClose={() => setShowRedeemModal(false)}
+          onSuccess={loadAllData}
+        />
+      )}
+
+      {showLockModal && (
+        <MembershipLockModal
+          onRedeemCode={() => {
+            setShowLockModal(false);
+            setShowRedeemModal(true);
+          }}
+          onClose={() => setShowLockModal(false)}
+        />
+      )}
+
+      {/* 完成学习会话弹窗 */}
+      {showCompleteSession && (
+        <CompleteSessionModal
+          sessionData={sessionData}
+          onClose={() => {
+            setShowCompleteSession(false);
+            setSessionData(null);
+          }}
+          onComplete={confirmCompleteSession}
+        />
       )}
     </div>
   );
@@ -958,6 +1126,7 @@ function QuickCompleteModal({ task, onClose, onComplete }) {
   const [minutes, setMinutes] = useState(task.estimated_minutes || 30);
   const [proofType, setProofType] = useState('photo');
   const [proofData, setProofData] = useState(null);
+  const [notes, setNotes] = useState('');
   const fileInputRef = useRef(null);
 
   const handleFileUpload = (e) => {
@@ -973,6 +1142,14 @@ function QuickCompleteModal({ task, onClose, onComplete }) {
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  const handleComplete = () => {
+    const proofWithNotes = {
+      ...proofData,
+      notes: notes || undefined,
+    };
+    onComplete(task, minutes, proofWithNotes);
   };
 
   return (
@@ -1035,6 +1212,23 @@ function QuickCompleteModal({ task, onClose, onComplete }) {
           </button>
         </div>
 
+        {/* 学习笔记 */}
+        <div>
+          <label className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm font-medium text-gray-700 mb-1.5 sm:mb-2">
+            <Edit2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            学习笔记
+            <span className="text-gray-400 text-[10px] sm:text-xs font-normal">（可选）</span>
+          </label>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            maxLength={500}
+            placeholder="记录学习心得..."
+            className="w-full px-3 sm:px-4 py-2 sm:py-2.5 border-2 border-gray-200 rounded-lg focus:border-indigo-500 focus:outline-none resize-none min-h-[80px] text-xs sm:text-sm"
+          />
+          <div className="text-right text-[10px] sm:text-xs text-gray-400 mt-1">{notes.length}/500</div>
+        </div>
+
         <div className="flex gap-2 sm:gap-3 pt-3 sm:pt-4">
           <button
             onClick={onClose}
@@ -1043,7 +1237,7 @@ function QuickCompleteModal({ task, onClose, onComplete }) {
             取消
           </button>
           <button
-            onClick={() => onComplete(task, minutes, proofData)}
+            onClick={handleComplete}
             disabled={!proofData}
             className="flex-1 px-3 sm:px-4 py-2 sm:py-2.5 text-sm sm:text-base bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg font-medium hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -1155,7 +1349,9 @@ function TimerModal({ task, onComplete, onClose }) {
     const actualMinutes = mode === 'countup'
       ? Math.ceil(seconds / 60)
       : Math.ceil((countdownTarget - seconds) / 60);
-    onComplete(proofData, actualMinutes);
+    const duration = formatTime(seconds);
+    const durationString = `${duration.hours}:${duration.minutes}:${duration.seconds}`;
+    onComplete(proofData, actualMinutes, durationString);
   };
 
   const time = formatTime(seconds);
@@ -1363,6 +1559,238 @@ function TimerModal({ task, onComplete, onClose }) {
   );
 }
 
+// 完成学习会话弹窗
+function CompleteSessionModal({ sessionData, onClose, onComplete }) {
+  const [notes, setNotes] = useState('');
+  const [uploadedImages, setUploadedImages] = useState([]);
+  const fileInputRef = useRef(null);
+
+  if (!sessionData) return null;
+
+  const { task, duration } = sessionData;
+
+  const handleImageUpload = (e) => {
+    const files = Array.from(e.target.files);
+
+    if (uploadedImages.length + files.length > 5) {
+      alert('最多只能上传5张图片');
+      return;
+    }
+
+    const validFiles = files.filter(file => {
+      if (file.size > 50 * 1024 * 1024) {
+        alert(`${file.name} 超过50MB限制`);
+        return false;
+      }
+      return true;
+    });
+
+    const newImages = validFiles.map(file => ({
+      file,
+      preview: URL.createObjectURL(file),
+      name: file.name
+    }));
+
+    setUploadedImages([...uploadedImages, ...newImages]);
+  };
+
+  const removeImage = (index) => {
+    const newImages = [...uploadedImages];
+    URL.revokeObjectURL(newImages[index].preview);
+    newImages.splice(index, 1);
+    setUploadedImages(newImages);
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const files = Array.from(e.dataTransfer.files).filter(file =>
+      file.type.startsWith('image/')
+    );
+
+    if (files.length > 0) {
+      const fakeEvent = { target: { files } };
+      handleImageUpload(fakeEvent);
+    }
+  };
+
+  // 将图片转换为 base64
+  const convertImagesToBase64 = async () => {
+    const convertImage = (file) => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    };
+
+    const base64Images = await Promise.all(
+      uploadedImages.map(img => convertImage(img.file))
+    );
+    return base64Images;
+  };
+
+  const handleSubmit = async () => {
+    // 转换图片为 base64
+    const base64Images = await convertImagesToBase64();
+
+    const data = {
+      notes,
+      images: base64Images, // base64 字符串数组
+      imageNames: uploadedImages.map(img => img.name),
+    };
+    onComplete(data);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl animate-scaleIn">
+        {/* 头部 */}
+        <div className="sticky top-0 bg-white border-b border-gray-200 px-4 sm:px-6 py-3 sm:py-4 rounded-t-2xl z-10">
+          <div className="flex items-start justify-between">
+            <div className="flex items-start gap-2 sm:gap-3">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-green-100 rounded-xl flex items-center justify-center shrink-0">
+                <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 text-green-600" />
+              </div>
+              <div>
+                <h2 className="text-lg sm:text-xl font-bold text-gray-800">完成学习会话</h2>
+                <p className="text-xs sm:text-sm text-gray-500 mt-0.5 sm:mt-1">添加学习笔记和相关本次学习的详细信息</p>
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="p-1 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              <X className="w-5 h-5 text-gray-500" />
+            </button>
+          </div>
+        </div>
+
+        {/* 内容区域 */}
+        <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
+          {/* 计时时长 */}
+          <div className="bg-gray-50 rounded-xl p-3 sm:p-4">
+            <div className="flex items-center justify-between mb-1 sm:mb-2">
+              <span className="text-xs sm:text-sm font-medium text-gray-600">计时时长</span>
+              <span className="text-xl sm:text-2xl font-bold text-blue-600">{duration || '00:00:00'}</span>
+            </div>
+            <div className="text-xs sm:text-sm text-gray-600 truncate">
+              {task?.title || '学习任务'}
+            </div>
+          </div>
+
+          {/* 学习笔记 */}
+          <div>
+            <label className="flex items-center gap-2 text-xs sm:text-sm font-semibold text-gray-700 mb-2 sm:mb-3">
+              <Edit2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              学习笔记
+              <span className="text-gray-400 text-[10px] sm:text-xs font-normal">（可选）</span>
+            </label>
+            <div className="relative">
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                maxLength={500}
+                placeholder="记录学习心得、重点内容或遇到的问题..."
+                className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none resize-none min-h-[100px] sm:min-h-[120px] text-xs sm:text-sm"
+              />
+              <div className="absolute bottom-2 sm:bottom-3 right-2 sm:right-3 text-[10px] sm:text-xs text-gray-400">
+                {notes.length}/500
+              </div>
+            </div>
+          </div>
+
+          {/* 备注图片 */}
+          <div>
+            <label className="flex items-center gap-2 text-xs sm:text-sm font-semibold text-gray-700 mb-2 sm:mb-3">
+              <ImageIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              备注图片
+              <span className="text-gray-400 text-[10px] sm:text-xs font-normal">（最多5张）</span>
+            </label>
+
+            {/* 已上传的图片预览 */}
+            {uploadedImages.length > 0 && (
+              <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-2 sm:mb-3">
+                {uploadedImages.map((image, index) => (
+                  <div key={index} className="relative group">
+                    <img
+                      src={image.preview}
+                      alt={image.name}
+                      className="w-full h-20 sm:h-24 object-cover rounded-lg border-2 border-gray-200"
+                    />
+                    <button
+                      onClick={() => removeImage(index)}
+                      className="absolute -top-1.5 sm:-top-2 -right-1.5 sm:-right-2 w-5 h-5 sm:w-6 sm:h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                    >
+                      <X className="w-3 h-3 sm:w-4 sm:h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 上传区域 */}
+            {uploadedImages.length < 5 && (
+              <div
+                onDragOver={handleDragOver}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className="border-2 border-dashed border-gray-300 rounded-xl p-6 sm:p-8 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition-all"
+              >
+                <div className="flex flex-col items-center gap-2 sm:gap-3">
+                  <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gray-100 rounded-full flex items-center justify-center">
+                    <Upload className="w-5 h-5 sm:w-6 sm:h-6 text-gray-400" />
+                  </div>
+                  <div>
+                    <p className="text-xs sm:text-sm text-gray-600 mb-0.5 sm:mb-1">点击上传或拖拽文件到此处</p>
+                    <p className="text-[10px] sm:text-xs text-gray-400">
+                      支持图片（最多{5 - uploadedImages.length}个，单个最大50MB）
+                    </p>
+                  </div>
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleImageUpload}
+                  className="hidden"
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 底部按钮 */}
+        <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 sm:px-6 py-3 sm:py-4 rounded-b-2xl">
+          <div className="flex gap-2 sm:gap-3">
+            <button
+              onClick={onClose}
+              className="flex-1 px-4 sm:px-6 py-2.5 sm:py-3 bg-white border-2 border-gray-200 hover:bg-gray-50 rounded-xl font-semibold text-gray-700 transition-colors text-sm sm:text-base"
+            >
+              取消
+            </button>
+            <button
+              onClick={handleSubmit}
+              className="flex-1 px-4 sm:px-6 py-2.5 sm:py-3 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-1.5 sm:gap-2 text-sm sm:text-base"
+            >
+              <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5" />
+              确认完成
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // 完成反馈
 function CompletionFeedback({ task, minutes }) {
   return (
@@ -1387,7 +1815,7 @@ function CompletedTaskCard({ task }) {
   const [showImagePreview, setShowImagePreview] = useState(false);
 
   const record = task.todayRecord;
-  const hasProof = record?.proof_type && record?.proof_data;
+  const hasProof = (record?.proof_type && record?.proof_data) || record?.proof_notes;
 
   return (
     <>
@@ -1406,7 +1834,8 @@ function CompletedTaskCard({ task }) {
                 <div className="font-medium text-sm sm:text-base text-gray-800 truncate">{task.title}</div>
                 <div className="text-xs sm:text-sm text-gray-600">
                   用时: {record?.actual_minutes || 0}分钟 • 获得 +{task.points}分
-                  {hasProof && <span className="ml-1 sm:ml-2 text-blue-600">📷 有证明</span>}
+                  {record?.proof_type && record?.proof_data && <span className="ml-1 sm:ml-2 text-blue-600">📷</span>}
+                  {record?.proof_notes && <span className="ml-1 sm:ml-2 text-purple-600">📝</span>}
                 </div>
               </div>
             </div>
@@ -1437,8 +1866,21 @@ function CompletedTaskCard({ task }) {
                 </div>
               )}
 
-              {/* 证明资料 */}
-              {hasProof && (
+              {/* 学习笔记 */}
+              {record?.proof_notes && (
+                <div className="mt-2 sm:mt-3">
+                  <div className="font-medium text-gray-700 mb-1.5 sm:mb-2 flex items-center gap-1.5 sm:gap-2 text-sm sm:text-base">
+                    <Edit2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-green-600" />
+                    学习笔记：
+                  </div>
+                  <div className="bg-white rounded-lg p-2.5 sm:p-3 border border-gray-200 text-xs sm:text-sm text-gray-700 whitespace-pre-wrap">
+                    {record.proof_notes}
+                  </div>
+                </div>
+              )}
+
+              {/* 证明资料 - 图片或录音 */}
+              {record?.proof_type && record?.proof_data && (
                 <div className="mt-2 sm:mt-3">
                   <div className="font-medium text-gray-700 mb-1.5 sm:mb-2 flex items-center gap-1.5 sm:gap-2 text-sm sm:text-base">
                     <Upload className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-green-600" />
@@ -1515,8 +1957,263 @@ function CompletedTaskCard({ task }) {
 }
 
 // 奖励页面
-function RewardsPage({ rewards, totalPoints, redemptionRecords, onRedeem, onAddReward, onBack }) {
+function RewardsPage({ rewards, totalPoints, redemptionRecords, membershipInfo, onRedeem, onAddReward, onBack, onRedeemCode }) {
+  const [selectedPlan, setSelectedPlan] = useState('lifetime');
   const canAfford = (reward) => totalPoints >= reward.points;
+
+  // 判断是否为有效会员
+  const isMember = membershipInfo && membershipInfo.status !== 'expired';
+
+  // 非会员显示升级引导页面
+  if (!isMember) {
+    return (
+      <div className="space-y-4 sm:space-y-6">
+        {/* 页面导航头部 */}
+        <div className="bg-white rounded-xl shadow-md p-3 sm:p-4">
+          <button
+            onClick={onBack}
+            className="flex items-center gap-1.5 sm:gap-2 text-gray-600 hover:text-gray-900 transition-colors mb-3 sm:mb-4 group"
+          >
+            <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5 group-hover:-translate-x-1 transition-transform" />
+            <span className="text-sm sm:text-base font-medium">返回首页</span>
+          </button>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-pink-500 to-purple-600 rounded-lg sm:rounded-xl flex items-center justify-center">
+              <Gift className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+            </div>
+            <div>
+              <h2 className="text-lg sm:text-2xl font-bold text-gray-800">奖励商店</h2>
+              <p className="text-xs sm:text-sm text-gray-500 hidden sm:block">使用积分兑换心仪的奖励</p>
+            </div>
+          </div>
+        </div>
+
+        {/* 会员升级引导卡片 */}
+        <div className="bg-gradient-to-br from-yellow-50 to-orange-50 rounded-2xl sm:rounded-3xl shadow-xl p-4 sm:p-8">
+          {/* 标题区域 */}
+          <div className="text-center mb-6">
+            <div className="inline-flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 bg-gradient-to-br from-orange-400 to-orange-600 rounded-2xl sm:rounded-3xl mb-4 shadow-lg">
+              <Crown className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-2">解锁高级功能</h2>
+            <p className="text-sm sm:text-base text-gray-600">升级会员，享受更多专属特权</p>
+          </div>
+
+          {/* 当前状态 */}
+          <div className="bg-white rounded-2xl p-4 mb-6 border-2 border-gray-100">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gray-100 rounded-xl flex items-center justify-center">
+                  <Lock className="w-5 h-5 sm:w-6 sm:h-6 text-gray-400" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-gray-800 text-sm sm:text-base">试用用户</span>
+                  </div>
+                  <p className="text-xs sm:text-sm text-gray-500 mt-0.5">会员已过期，请续费使用进阶功能</p>
+                </div>
+              </div>
+              <span className="bg-red-500 text-white px-3 py-1 rounded-lg text-xs sm:text-sm font-medium">
+                已过期
+              </span>
+            </div>
+          </div>
+
+          {/* 套餐选择 */}
+          <div className="mb-6">
+            <h3 className="text-base sm:text-lg font-bold text-gray-800 mb-3">选择您的套餐</h3>
+            <div className="grid grid-cols-2 gap-3">
+              {/* 年度会员 */}
+              <div
+                onClick={() => setSelectedPlan('annual')}
+                className={`relative bg-white rounded-xl sm:rounded-2xl p-3 sm:p-4 cursor-pointer transition-all border-2 ${
+                  selectedPlan === 'annual'
+                    ? 'border-orange-400 shadow-lg'
+                    : 'border-gray-200 hover:border-orange-300'
+                }`}
+              >
+                <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-orange-400 to-orange-600 rounded-lg sm:rounded-xl flex items-center justify-center shrink-0">
+                    <Crown className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <h4 className="font-bold text-gray-800 text-xs sm:text-sm">年度会员</h4>
+                    <p className="text-[10px] sm:text-xs text-gray-500 truncate">全功能 · 12个月</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  <span className="bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full text-[10px] font-medium">
+                    超值
+                  </span>
+                </div>
+              </div>
+
+              {/* 永久会员 */}
+              <div
+                onClick={() => setSelectedPlan('lifetime')}
+                className={`relative bg-white rounded-xl sm:rounded-2xl p-3 sm:p-4 cursor-pointer transition-all border-2 ${
+                  selectedPlan === 'lifetime'
+                    ? 'border-purple-400 shadow-lg'
+                    : 'border-gray-200 hover:border-purple-300'
+                }`}
+              >
+                {/* 推荐标签 */}
+                <div className="absolute -top-2 -right-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-bold shadow-lg">
+                  推荐
+                </div>
+
+                <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg sm:rounded-xl flex items-center justify-center shrink-0">
+                    <Star className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <h4 className="font-bold text-gray-800 text-xs sm:text-sm">永久会员</h4>
+                    <p className="text-[10px] sm:text-xs text-gray-500 truncate">终身 · 一次购买</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full text-[10px] font-medium">
+                    永久服务
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 已有兑换码？立即兑换 */}
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-4 sm:p-5 mb-6">
+            <div className="flex flex-col sm:flex-row items-center gap-3 sm:gap-4">
+              <div className="flex items-center gap-2 shrink-0">
+                <Crown className="w-5 h-5 sm:w-6 sm:h-6 text-indigo-600" />
+                <span className="font-semibold text-gray-800 text-sm sm:text-base">已有兑换码？</span>
+              </div>
+              <button
+                onClick={onRedeemCode}
+                className="w-full sm:w-auto bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white px-6 sm:px-8 py-2.5 sm:py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2 text-sm"
+              >
+                <Crown className="w-4 h-4 sm:w-5 sm:h-5" />
+                点击兑换会员
+              </button>
+            </div>
+          </div>
+
+          {/* 如何获取会员码 */}
+          <div className="mb-6">
+            <h2 className="text-base sm:text-lg font-bold text-gray-800 mb-4">如何获取会员码？</h2>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+              {/* 方式一：小红书购买 */}
+              <div className="bg-gradient-to-br from-red-50 to-orange-50 rounded-2xl shadow-sm border-2 border-red-200 p-4 sm:p-6">
+                <div className="flex items-center gap-2 mb-3 sm:mb-4">
+                  <div className="w-8 h-8 bg-red-500 rounded-lg flex items-center justify-center shrink-0">
+                    <span className="text-white text-sm">📕</span>
+                  </div>
+                  <h3 className="font-bold text-gray-800 text-sm sm:text-base">方式一：小红书购买</h3>
+                </div>
+
+                <p className="text-xs sm:text-sm text-gray-700 mb-3 sm:mb-4 leading-relaxed">
+                  点击下方购买链接，进入主页选择购买即可。
+                </p>
+
+                <a
+                  href="https://www.xiaohongshu.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600 text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2 text-sm"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  去小红书购买
+                </a>
+              </div>
+
+              {/* 方式二：微信客服 */}
+              <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl shadow-sm border-2 border-green-200 p-4 sm:p-6">
+                <div className="flex items-center gap-2 mb-3 sm:mb-4">
+                  <div className="w-8 h-8 bg-green-500 rounded-lg flex items-center justify-center shrink-0">
+                    <span className="text-white text-sm">💬</span>
+                  </div>
+                  <h3 className="font-bold text-gray-800 text-sm sm:text-base">方式二：微信客服</h3>
+                </div>
+
+                <p className="text-xs sm:text-sm text-gray-700 mb-3 sm:mb-4 leading-relaxed">
+                  扫描下方二维码添加客服微信，直接转账购买，客服会手动发您兑换码。
+                </p>
+
+                {/* 二维码 */}
+                <div className="bg-white rounded-xl p-3 sm:p-4 border-2 border-green-200 mb-3 sm:mb-4">
+                  <img
+                    src="/wechat-qr.jpg"
+                    alt="微信客服二维码"
+                    className="w-full max-w-[180px] mx-auto rounded-lg"
+                  />
+                </div>
+
+                <div className="bg-green-100 border border-green-300 rounded-lg px-3 sm:px-4 py-2 sm:py-3">
+                  <p className="text-[10px] sm:text-xs text-green-800 text-center">
+                    添加时请告知"需要会员"，方便客服快速确认。
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 温馨提示 */}
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 sm:p-4 mb-6">
+            <div className="flex items-start gap-2 sm:gap-3">
+              <div className="text-blue-600 mt-0.5 text-sm sm:text-base">ℹ️</div>
+              <div className="text-xs sm:text-sm text-blue-800">
+                <p className="font-semibold mb-1">温馨提示：</p>
+                <ul className="space-y-0.5 sm:space-y-1 text-blue-700">
+                  <li>• 每个兑换码只能使用一次</li>
+                  <li>• 兑换成功后会自动激活对应会员权益</li>
+                  <li>• 如遇问题请及时联系客服处理</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          {/* 会员特权列表 */}
+          <div>
+            <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm sm:text-base">
+              <Star className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-500 fill-yellow-500" />
+              会员特权
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+              <div className="flex items-center gap-2 bg-white/60 rounded-lg p-2 sm:p-2.5">
+                <div className="w-5 h-5 sm:w-6 sm:h-6 bg-green-100 rounded-full flex items-center justify-center shrink-0">
+                  <Check className="w-3 h-3 sm:w-4 sm:h-4 text-green-600" />
+                </div>
+                <span className="text-xs sm:text-sm text-gray-700">解锁积分兑换功能</span>
+              </div>
+
+              <div className="flex items-center gap-2 bg-white/60 rounded-lg p-2 sm:p-2.5">
+                <div className="w-5 h-5 sm:w-6 sm:h-6 bg-green-100 rounded-full flex items-center justify-center shrink-0">
+                  <Check className="w-3 h-3 sm:w-4 sm:h-4 text-green-600" />
+                </div>
+                <span className="text-xs sm:text-sm text-gray-700">解锁全部高级功能</span>
+              </div>
+
+              <div className="flex items-center gap-2 bg-white/60 rounded-lg p-2 sm:p-2.5">
+                <div className="w-5 h-5 sm:w-6 sm:h-6 bg-green-100 rounded-full flex items-center justify-center shrink-0">
+                  <Check className="w-3 h-3 sm:w-4 sm:h-4 text-green-600" />
+                </div>
+                <span className="text-xs sm:text-sm text-gray-700">详细数据统计分析</span>
+              </div>
+
+              <div className="flex items-center gap-2 bg-white/60 rounded-lg p-2 sm:p-2.5">
+                <div className="w-5 h-5 sm:w-6 sm:h-6 bg-green-100 rounded-full flex items-center justify-center shrink-0">
+                  <Check className="w-3 h-3 sm:w-4 sm:h-4 text-green-600" />
+                </div>
+                <span className="text-xs sm:text-sm text-gray-700">优先技术支持</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 会员正常显示奖励列表
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -1796,6 +2493,776 @@ function Modal({ onClose, title, children }) {
         </div>
         <div className="p-4 sm:p-6">{children}</div>
       </div>
+    </div>
+  );
+}
+
+// 总计划预览页面
+function TotalPlanPreview({ tasks, completionRecords, membershipInfo, onBack, onRedeemCode }) {
+  // 判断是否为有效会员
+  const isMember = membershipInfo && membershipInfo.status !== 'expired';
+  const [selectedPlan, setSelectedPlan] = useState('lifetime');
+
+  // 日期筛选状态
+  const today = new Date();
+
+  const formatDateForInput = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // 获取月份的第一天和最后一天
+  const getMonthStart = (date) => {
+    return new Date(date.getFullYear(), date.getMonth(), 1);
+  };
+
+  const getMonthEnd = (date) => {
+    return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+  };
+
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [startDate, setStartDate] = useState(formatDateForInput(getMonthStart(today)));
+  const [endDate, setEndDate] = useState(formatDateForInput(getMonthEnd(today)));
+  const [category, setCategory] = useState('all');
+  const [viewType, setViewType] = useState('month');
+
+  // 月视图下，自动同步日期范围
+  useEffect(() => {
+    if (viewType === 'month') {
+      setStartDate(formatDateForInput(getMonthStart(currentMonth)));
+      setEndDate(formatDateForInput(getMonthEnd(currentMonth)));
+    }
+  }, [currentMonth, viewType]);
+
+  const formatDateKey = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // 根据任务生成计划数据（考虑日期筛选）
+  const generatePlanData = () => {
+    const planData = {};
+    const filterStart = new Date(startDate);
+    const filterEnd = new Date(endDate);
+
+    // 遍历所有任务
+    tasks.forEach(task => {
+      // 分类筛选
+      if (category !== 'all') {
+        // 可以根据任务的某个属性筛选，这里暂时跳过
+      }
+
+      const taskStartDate = new Date(task.start_date || task.created_at);
+      const repeatType = task.repeat_type || task.task_type || 'daily';
+
+      // 遍历日期范围内的每一天
+      const currentDay = new Date(filterStart);
+      while (currentDay <= filterEnd) {
+        const diffDays = Math.floor((currentDay - taskStartDate) / (1000 * 60 * 60 * 24));
+        let shouldShow = false;
+
+        switch (repeatType) {
+          case 'once':
+            shouldShow = diffDays === 0;
+            break;
+          case 'daily':
+            shouldShow = diffDays >= 0;
+            break;
+          case 'weekly':
+            shouldShow = diffDays >= 0 && diffDays % 7 === 0;
+            break;
+          case 'biweekly':
+            shouldShow = diffDays >= 0 && diffDays % 14 === 0;
+            break;
+          case 'ebbinghaus':
+            const ebbinghausDays = [0, 1, 2, 4, 7, 15, 30];
+            shouldShow = ebbinghausDays.includes(diffDays);
+            break;
+          default:
+            shouldShow = diffDays >= 0;
+        }
+
+        if (shouldShow) {
+          const dateKey = formatDateKey(currentDay);
+          if (!planData[dateKey]) {
+            planData[dateKey] = [];
+          }
+          planData[dateKey].push({
+            taskId: task.id,
+            title: task.title,
+            points: task.points,
+            category: task.task_type || 'daily'
+          });
+        }
+
+        currentDay.setDate(currentDay.getDate() + 1);
+      }
+    });
+
+    return planData;
+  };
+
+  const planData = generatePlanData();
+
+  // 获取当月的日历数据
+  const getMonthCalendar = () => {
+    const year = currentMonth.getFullYear();
+    const month = currentMonth.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    const startingDayOfWeek = firstDay.getDay();
+
+    const calendar = [];
+    let week = [];
+
+    // 填充上个月的日期
+    const prevMonthLastDay = new Date(year, month, 0).getDate();
+    const prevMonthDays = startingDayOfWeek === 0 ? 6 : startingDayOfWeek - 1;
+    for (let i = prevMonthDays; i > 0; i--) {
+      week.push({
+        date: prevMonthLastDay - i + 1,
+        isCurrentMonth: false,
+        fullDate: new Date(year, month - 1, prevMonthLastDay - i + 1)
+      });
+    }
+
+    // 填充当月日期
+    for (let date = 1; date <= daysInMonth; date++) {
+      week.push({
+        date,
+        isCurrentMonth: true,
+        fullDate: new Date(year, month, date)
+      });
+
+      if (week.length === 7) {
+        calendar.push(week);
+        week = [];
+      }
+    }
+
+    // 填充下个月的日期
+    if (week.length > 0) {
+      const remainingDays = 7 - week.length;
+      for (let date = 1; date <= remainingDays; date++) {
+        week.push({
+          date,
+          isCurrentMonth: false,
+          fullDate: new Date(year, month + 1, date)
+        });
+      }
+      calendar.push(week);
+    }
+
+    return calendar;
+  };
+
+  const isToday = (date) => {
+    const today = new Date();
+    return date.getFullYear() === today.getFullYear() &&
+           date.getMonth() === today.getMonth() &&
+           date.getDate() === today.getDate();
+  };
+
+  // 检查日期是否在筛选范围内
+  const isInRange = (date) => {
+    const filterStart = new Date(startDate);
+    const filterEnd = new Date(endDate);
+    return date >= filterStart && date <= filterEnd;
+  };
+
+  const goToPrevMonth = () => {
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
+  };
+
+  const goToNextMonth = () => {
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
+  };
+
+  // 切换视图类型时同步日期
+  const handleViewTypeChange = (newViewType) => {
+    setViewType(newViewType);
+    // useEffect 会自动处理日期同步
+  };
+
+  const resetFilters = () => {
+    const t = new Date();
+    setCurrentMonth(t);
+    setCategory('all');
+    // useEffect 会自动处理日期同步
+  };
+
+  const calendar = getMonthCalendar();
+  const monthYear = `${currentMonth.getFullYear()}.${String(currentMonth.getMonth() + 1).padStart(2, '0')}`;
+
+  // 根据筛选条件过滤的计划数据
+  const filteredPlanData = Object.fromEntries(
+    Object.entries(planData).filter(([date]) => {
+      const d = new Date(date);
+      return isInRange(d);
+    })
+  );
+
+  // 非会员显示升级引导页面
+  if (!isMember) {
+    return (
+      <div className="space-y-4 sm:space-y-6">
+        {/* 页面导航头部 */}
+        <div className="bg-white rounded-xl shadow-md p-3 sm:p-4">
+          <button
+            onClick={onBack}
+            className="flex items-center gap-1.5 sm:gap-2 text-gray-600 hover:text-gray-900 transition-colors mb-3 sm:mb-4 group"
+          >
+            <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5 group-hover:-translate-x-1 transition-transform" />
+            <span className="text-sm sm:text-base font-medium">返回首页</span>
+          </button>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg sm:rounded-xl flex items-center justify-center">
+              <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+            </div>
+            <div>
+              <h2 className="text-lg sm:text-2xl font-bold text-gray-800">计划汇总</h2>
+              <p className="text-xs sm:text-sm text-gray-500 hidden sm:block">查看所有学习计划的日历视图</p>
+            </div>
+          </div>
+        </div>
+
+        {/* 会员升级引导卡片 */}
+        <div className="bg-gradient-to-br from-yellow-50 to-orange-50 rounded-2xl sm:rounded-3xl shadow-xl p-4 sm:p-8">
+          {/* 标题区域 */}
+          <div className="text-center mb-6">
+            <div className="inline-flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 bg-gradient-to-br from-orange-400 to-orange-600 rounded-2xl sm:rounded-3xl mb-4 shadow-lg">
+              <Crown className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-2">解锁高级功能</h2>
+            <p className="text-sm sm:text-base text-gray-600">升级会员，享受更多专属特权</p>
+          </div>
+
+          {/* 当前状态 */}
+          <div className="bg-white rounded-2xl p-4 mb-6 border-2 border-gray-100">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gray-100 rounded-xl flex items-center justify-center">
+                  <Lock className="w-5 h-5 sm:w-6 sm:h-6 text-gray-400" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-gray-800 text-sm sm:text-base">试用用户</span>
+                  </div>
+                  <p className="text-xs sm:text-sm text-gray-500 mt-0.5">会员已过期，请续费使用进阶功能</p>
+                </div>
+              </div>
+              <span className="bg-red-500 text-white px-3 py-1 rounded-lg text-xs sm:text-sm font-medium">
+                已过期
+              </span>
+            </div>
+          </div>
+
+          {/* 套餐选择 */}
+          <div className="mb-6">
+            <h3 className="text-base sm:text-lg font-bold text-gray-800 mb-3">选择您的套餐</h3>
+            <div className="grid grid-cols-2 gap-3">
+              {/* 年度会员 */}
+              <div
+                onClick={() => setSelectedPlan('annual')}
+                className={`relative bg-white rounded-xl sm:rounded-2xl p-3 sm:p-4 cursor-pointer transition-all border-2 ${
+                  selectedPlan === 'annual'
+                    ? 'border-orange-400 shadow-lg'
+                    : 'border-gray-200 hover:border-orange-300'
+                }`}
+              >
+                <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-orange-400 to-orange-600 rounded-lg sm:rounded-xl flex items-center justify-center shrink-0">
+                    <Crown className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <h4 className="font-bold text-gray-800 text-xs sm:text-sm">年度会员</h4>
+                    <p className="text-[10px] sm:text-xs text-gray-500 truncate">全功能 · 12个月</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  <span className="bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full text-[10px] font-medium">
+                    超值
+                  </span>
+                </div>
+              </div>
+
+              {/* 永久会员 */}
+              <div
+                onClick={() => setSelectedPlan('lifetime')}
+                className={`relative bg-white rounded-xl sm:rounded-2xl p-3 sm:p-4 cursor-pointer transition-all border-2 ${
+                  selectedPlan === 'lifetime'
+                    ? 'border-purple-400 shadow-lg'
+                    : 'border-gray-200 hover:border-purple-300'
+                }`}
+              >
+                {/* 推荐标签 */}
+                <div className="absolute -top-2 -right-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-bold shadow-lg">
+                  推荐
+                </div>
+
+                <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg sm:rounded-xl flex items-center justify-center shrink-0">
+                    <Star className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <h4 className="font-bold text-gray-800 text-xs sm:text-sm">永久会员</h4>
+                    <p className="text-[10px] sm:text-xs text-gray-500 truncate">终身 · 一次购买</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full text-[10px] font-medium">
+                    永久服务
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 已有兑换码？立即兑换 */}
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-4 sm:p-5 mb-6">
+            <div className="flex flex-col sm:flex-row items-center gap-3 sm:gap-4">
+              <div className="flex items-center gap-2 shrink-0">
+                <Crown className="w-5 h-5 sm:w-6 sm:h-6 text-indigo-600" />
+                <span className="font-semibold text-gray-800 text-sm sm:text-base">已有兑换码？</span>
+              </div>
+              <button
+                onClick={onRedeemCode}
+                className="w-full sm:w-auto bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white px-6 sm:px-8 py-2.5 sm:py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2 text-sm"
+              >
+                <Crown className="w-4 h-4 sm:w-5 sm:h-5" />
+                点击兑换会员
+              </button>
+            </div>
+          </div>
+
+          {/* 如何获取会员码 */}
+          <div className="mb-6">
+            <h2 className="text-base sm:text-lg font-bold text-gray-800 mb-4">如何获取会员码？</h2>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+              {/* 方式一：小红书购买 */}
+              <div className="bg-gradient-to-br from-red-50 to-orange-50 rounded-2xl shadow-sm border-2 border-red-200 p-4 sm:p-6">
+                <div className="flex items-center gap-2 mb-3 sm:mb-4">
+                  <div className="w-8 h-8 bg-red-500 rounded-lg flex items-center justify-center shrink-0">
+                    <span className="text-white text-sm">📕</span>
+                  </div>
+                  <h3 className="font-bold text-gray-800 text-sm sm:text-base">方式一：小红书购买</h3>
+                </div>
+
+                <p className="text-xs sm:text-sm text-gray-700 mb-3 sm:mb-4 leading-relaxed">
+                  点击下方购买链接，进入主页选择购买即可。
+                </p>
+
+                <a
+                  href="https://www.xiaohongshu.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600 text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2 text-sm"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  去小红书购买
+                </a>
+              </div>
+
+              {/* 方式二：微信客服 */}
+              <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl shadow-sm border-2 border-green-200 p-4 sm:p-6">
+                <div className="flex items-center gap-2 mb-3 sm:mb-4">
+                  <div className="w-8 h-8 bg-green-500 rounded-lg flex items-center justify-center shrink-0">
+                    <span className="text-white text-sm">💬</span>
+                  </div>
+                  <h3 className="font-bold text-gray-800 text-sm sm:text-base">方式二：微信客服</h3>
+                </div>
+
+                <p className="text-xs sm:text-sm text-gray-700 mb-3 sm:mb-4 leading-relaxed">
+                  扫描下方二维码添加客服微信，直接转账购买，客服会手动发您兑换码。
+                </p>
+
+                {/* 二维码 */}
+                <div className="bg-white rounded-xl p-3 sm:p-4 border-2 border-green-200 mb-3 sm:mb-4">
+                  <img
+                    src="/wechat-qr.jpg"
+                    alt="微信客服二维码"
+                    className="w-full max-w-[180px] mx-auto rounded-lg"
+                  />
+                </div>
+
+                <div className="bg-green-100 border border-green-300 rounded-lg px-3 sm:px-4 py-2 sm:py-3">
+                  <p className="text-[10px] sm:text-xs text-green-800 text-center">
+                    添加时请告知"需要会员"，方便客服快速确认。
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 温馨提示 */}
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 sm:p-4 mb-6">
+            <div className="flex items-start gap-2 sm:gap-3">
+              <div className="text-blue-600 mt-0.5 text-sm sm:text-base">ℹ️</div>
+              <div className="text-xs sm:text-sm text-blue-800">
+                <p className="font-semibold mb-1">温馨提示：</p>
+                <ul className="space-y-0.5 sm:space-y-1 text-blue-700">
+                  <li>• 每个兑换码只能使用一次</li>
+                  <li>• 兑换成功后会自动激活对应会员权益</li>
+                  <li>• 如遇问题请及时联系客服处理</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          {/* 会员特权列表 */}
+          <div>
+            <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-sm sm:text-base">
+              <Star className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-500 fill-yellow-500" />
+              会员特权
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+              <div className="flex items-center gap-2 bg-white/60 rounded-lg p-2 sm:p-2.5">
+                <div className="w-5 h-5 sm:w-6 sm:h-6 bg-green-100 rounded-full flex items-center justify-center shrink-0">
+                  <Check className="w-3 h-3 sm:w-4 sm:h-4 text-green-600" />
+                </div>
+                <span className="text-xs sm:text-sm text-gray-700">解锁积分兑换功能</span>
+              </div>
+
+              <div className="flex items-center gap-2 bg-white/60 rounded-lg p-2 sm:p-2.5">
+                <div className="w-5 h-5 sm:w-6 sm:h-6 bg-green-100 rounded-full flex items-center justify-center shrink-0">
+                  <Check className="w-3 h-3 sm:w-4 sm:h-4 text-green-600" />
+                </div>
+                <span className="text-xs sm:text-sm text-gray-700">解锁全部高级功能</span>
+              </div>
+
+              <div className="flex items-center gap-2 bg-white/60 rounded-lg p-2 sm:p-2.5">
+                <div className="w-5 h-5 sm:w-6 sm:h-6 bg-green-100 rounded-full flex items-center justify-center shrink-0">
+                  <Check className="w-3 h-3 sm:w-4 sm:h-4 text-green-600" />
+                </div>
+                <span className="text-xs sm:text-sm text-gray-700">详细数据统计分析</span>
+              </div>
+
+              <div className="flex items-center gap-2 bg-white/60 rounded-lg p-2 sm:p-2.5">
+                <div className="w-5 h-5 sm:w-6 sm:h-6 bg-green-100 rounded-full flex items-center justify-center shrink-0">
+                  <Check className="w-3 h-3 sm:w-4 sm:h-4 text-green-600" />
+                </div>
+                <span className="text-xs sm:text-sm text-gray-700">优先技术支持</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 会员正常显示计划汇总
+  return (
+    <div className="space-y-4 sm:space-y-6">
+      {/* 页面导航头部 */}
+      <div className="bg-white rounded-xl shadow-md p-3 sm:p-4">
+        <button
+          onClick={onBack}
+          className="flex items-center gap-1.5 sm:gap-2 text-gray-600 hover:text-gray-900 transition-colors mb-3 sm:mb-4 group"
+        >
+          <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5 group-hover:-translate-x-1 transition-transform" />
+          <span className="text-sm sm:text-base font-medium">返回首页</span>
+        </button>
+        <div className="flex items-center gap-2 sm:gap-3">
+          <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg sm:rounded-xl flex items-center justify-center">
+            <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+          </div>
+          <div>
+            <h2 className="text-lg sm:text-2xl font-bold text-gray-800">计划汇总</h2>
+            <p className="text-xs sm:text-sm text-gray-500 hidden sm:block">查看所有学习计划的日历视图</p>
+          </div>
+        </div>
+      </div>
+
+      {/* 筛选区域 */}
+      <div className="bg-white rounded-xl shadow-md p-3 sm:p-4">
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+          {/* 开始日期 */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <label className="text-xs sm:text-sm text-gray-600 whitespace-nowrap">开始日期:</label>
+            <div className={`flex items-center gap-1.5 sm:gap-2 border rounded-lg px-2 sm:px-3 py-1.5 sm:py-2 ${viewType === 'month' ? 'bg-gray-100 border-gray-200' : 'bg-gray-50 border-gray-200'}`}>
+              <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-gray-400" />
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                disabled={viewType === 'month'}
+                className={`bg-transparent text-xs sm:text-sm outline-none ${viewType === 'month' ? 'cursor-not-allowed text-gray-500' : ''}`}
+              />
+            </div>
+          </div>
+
+          <span className="text-gray-400 text-xs sm:text-sm">至</span>
+
+          {/* 结束日期 */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <label className="text-xs sm:text-sm text-gray-600 whitespace-nowrap">结束日期:</label>
+            <div className={`flex items-center gap-1.5 sm:gap-2 border rounded-lg px-2 sm:px-3 py-1.5 sm:py-2 ${viewType === 'month' ? 'bg-gray-100 border-gray-200' : 'bg-gray-50 border-gray-200'}`}>
+              <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-gray-400" />
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                disabled={viewType === 'month'}
+                className={`bg-transparent text-xs sm:text-sm outline-none ${viewType === 'month' ? 'cursor-not-allowed text-gray-500' : ''}`}
+              />
+            </div>
+          </div>
+
+          {/* 分类筛选 */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <label className="text-xs sm:text-sm text-gray-600 whitespace-nowrap">分类筛选:</label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="bg-gray-50 border border-gray-200 rounded-lg px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm outline-none"
+            >
+              <option value="all">全部分类</option>
+              <option value="study">学习</option>
+              <option value="reading">阅读</option>
+              <option value="activity">活动</option>
+            </select>
+          </div>
+
+          {/* 重置按钮 */}
+          <button
+            onClick={resetFilters}
+            className="flex items-center gap-1 text-xs sm:text-sm text-gray-500 hover:text-gray-700 ml-auto"
+          >
+            <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span>{viewType === 'month' ? '回到当月' : '重置为默认'}</span>
+          </button>
+        </div>
+
+        {/* 月视图提示 */}
+        {viewType === 'month' && (
+          <div className="mt-2 text-xs text-gray-400 flex items-center gap-1">
+            <span>💡</span>
+            <span>月视图下日期自动跟随月份切换</span>
+          </div>
+        )}
+      </div>
+
+      {/* 视图切换 */}
+      <div className="bg-white rounded-xl shadow-md p-2 sm:p-3">
+        <div className="flex gap-2 sm:gap-4">
+          <button
+            onClick={() => handleViewTypeChange('month')}
+            className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+              viewType === 'month'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span>月视图</span>
+          </button>
+
+          <button
+            onClick={() => handleViewTypeChange('stats')}
+            className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+              viewType === 'stats'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span>统计视图</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 月视图内容 */}
+      {viewType === 'month' && (
+        <div className="bg-white rounded-xl shadow-md p-4 sm:p-6">
+          {/* 月份标题和导航 */}
+          <div className="flex items-center justify-between mb-4 sm:mb-6">
+            <h3 className="text-xl sm:text-2xl font-bold">
+              <span className="text-blue-600">{monthYear}</span>
+              <span className="text-gray-400 text-sm sm:text-base ml-2">MONTHLY PLANNER</span>
+            </h3>
+            <div className="flex items-center gap-1 sm:gap-2">
+              <button
+                onClick={goToPrevMonth}
+                className="p-1.5 sm:p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600" />
+              </button>
+              <button
+                onClick={goToNextMonth}
+                className="p-1.5 sm:p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600" />
+              </button>
+            </div>
+          </div>
+
+          {/* 状态图例 */}
+          <div className="flex items-center justify-end gap-3 sm:gap-4 mb-2 text-[10px] sm:text-xs text-gray-500">
+            <div className="flex items-center gap-1">
+              <div className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-green-500"></div>
+              <span>已完成</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-red-500"></div>
+              <span>已过期</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-gray-400"></div>
+              <span>待完成</span>
+            </div>
+          </div>
+
+          {/* 星期标题 */}
+          <div className="grid grid-cols-7 gap-0.5 sm:gap-1 mb-0.5 sm:mb-1">
+            {['一', '二', '三', '四', '五', '六', '日'].map((day) => (
+              <div key={day} className="bg-gray-100 py-2 sm:py-3 text-center rounded-t-lg">
+                <span className="text-[10px] sm:text-sm font-medium text-gray-600">周{day}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* 日历网格 */}
+          <div className="grid grid-cols-7 gap-0.5 sm:gap-1">
+            {calendar.map((week, weekIndex) => (
+              <React.Fragment key={weekIndex}>
+                {week.map((day, dayIndex) => {
+                  const dateKey = formatDateKey(day.fullDate);
+                  const plans = filteredPlanData[dateKey] || [];
+                  const isTodayDate = isToday(day.fullDate);
+                  const inRange = isInRange(day.fullDate);
+                  const todayDate = new Date();
+                  todayDate.setHours(0, 0, 0, 0);
+                  const dayDate = new Date(day.fullDate);
+                  dayDate.setHours(0, 0, 0, 0);
+                  const isPast = dayDate < todayDate;
+
+                  // 检查任务完成状态
+                  const getTaskStatus = (plan) => {
+                    const record = completionRecords.find(r =>
+                      r.task_id === plan.taskId && r.completion_date === dateKey
+                    );
+                    if (record) return 'completed';
+                    if (isPast) return 'expired';
+                    return 'pending';
+                  };
+
+                  // 状态点颜色
+                  const getStatusDot = (status) => {
+                    switch (status) {
+                      case 'completed':
+                        return 'bg-green-500';
+                      case 'expired':
+                        return 'bg-red-500';
+                      default:
+                        return 'bg-gray-400';
+                    }
+                  };
+
+                  return (
+                    <div
+                      key={dayIndex}
+                      className={`bg-white p-1 sm:p-2 rounded-lg border ${
+                        !day.isCurrentMonth
+                          ? 'bg-gray-50 border-gray-100'
+                          : !inRange
+                          ? 'bg-gray-100 border-gray-200 opacity-50'
+                          : 'border-gray-200'
+                      }`}
+                    >
+                      {/* 日期数字 */}
+                      <div className="flex items-center justify-between mb-1">
+                        <span
+                          className={`text-[10px] sm:text-sm font-medium ${
+                            !day.isCurrentMonth
+                              ? 'text-gray-300'
+                              : isTodayDate
+                              ? 'w-5 h-5 sm:w-6 sm:h-6 bg-blue-600 text-white rounded-full flex items-center justify-center'
+                              : 'text-gray-700'
+                          }`}
+                        >
+                          {day.date}
+                        </span>
+                      </div>
+
+                      {/* 计划列表 - 显示所有任务，不限制高度 */}
+                      {day.isCurrentMonth && inRange && plans.length > 0 && (
+                        <div className="space-y-0.5">
+                          {plans.map((plan, index) => {
+                            const status = getTaskStatus(plan);
+                            return (
+                              <div
+                                key={index}
+                                className="flex items-center gap-0.5 sm:gap-1 text-[7px] sm:text-[9px] text-gray-600 truncate bg-blue-50 px-1 sm:px-1.5 py-0.5 rounded"
+                              >
+                                <div className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full shrink-0 ${getStatusDot(status)}`}></div>
+                                <span className="truncate flex-1">{plan.title}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 统计视图 */}
+      {viewType === 'stats' && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+          <div className="bg-white rounded-xl shadow-md p-4 sm:p-6">
+            <div className="flex items-center justify-between mb-2 sm:mb-4">
+              <h4 className="text-xs sm:text-sm font-medium text-gray-600">总任务数</h4>
+              <Calendar className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
+            </div>
+            <div className="text-2xl sm:text-3xl font-bold text-gray-800">{tasks.length}</div>
+            <p className="text-[10px] sm:text-xs text-gray-500 mt-1">个学习计划</p>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-md p-4 sm:p-6">
+            <div className="flex items-center justify-between mb-2 sm:mb-4">
+              <h4 className="text-xs sm:text-sm font-medium text-gray-600">筛选范围内天数</h4>
+              <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-green-600" />
+            </div>
+            <div className="text-2xl sm:text-3xl font-bold text-gray-800">{Object.keys(filteredPlanData).length}</div>
+            <p className="text-[10px] sm:text-xs text-gray-500 mt-1">天有计划</p>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-md p-4 sm:p-6">
+            <div className="flex items-center justify-between mb-2 sm:mb-4">
+              <h4 className="text-xs sm:text-sm font-medium text-gray-600">已完成</h4>
+              <Check className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600" />
+            </div>
+            <div className="text-2xl sm:text-3xl font-bold text-gray-800">{completionRecords.length}</div>
+            <p className="text-[10px] sm:text-xs text-gray-500 mt-1">次完成记录</p>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-md p-4 sm:p-6">
+            <div className="flex items-center justify-between mb-2 sm:mb-4">
+              <h4 className="text-xs sm:text-sm font-medium text-gray-600">日均任务</h4>
+              <List className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600" />
+            </div>
+            <div className="text-2xl sm:text-3xl font-bold text-gray-800">
+              {Object.keys(filteredPlanData).length > 0
+                ? Math.round(
+                    Object.values(filteredPlanData).reduce((sum, plans) => sum + plans.length, 0) /
+                    Object.keys(filteredPlanData).length
+                  )
+                : 0}
+            </div>
+            <p className="text-[10px] sm:text-xs text-gray-500 mt-1">个任务/天</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
