@@ -285,12 +285,29 @@ export const subscriptionService = {
     // 标准化兑换码格式：转大写，去除多余空格
     const normalizedCode = code.trim().toUpperCase();
 
+    // 🔍 调试日志
+    console.log('=== 兑换码调试信息 ===');
+    console.log('1. 用户输入的兑换码:', code);
+    console.log('2. 标准化后的兑换码:', normalizedCode);
+    console.log('3. 兑换码长度:', normalizedCode.length);
+
+    // 🔍 测试：查询所有兑换码
+    const { data: allCodes, error: allCodesError } = await supabase
+      .from('redemption_codes')
+      .select('code, is_used, code_type')
+      .limit(5);
+    console.log('🔍 所有兑换码（前5个）:', allCodes);
+    console.log('🔍 查询错误:', allCodesError);
+
     // 1. 检查兑换码是否存在且未使用
     const { data: codeRecord, error: codeError } = await supabase
       .from('redemption_codes')
       .select('*')
       .eq('code', normalizedCode)
       .maybeSingle();
+
+    console.log('4. 数据库查询结果:', codeRecord);
+    console.log('5. 查询错误:', codeError);
 
     if (codeError) throw codeError;
 
