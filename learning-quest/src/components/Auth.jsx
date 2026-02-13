@@ -85,7 +85,7 @@ export default function Auth({ onAuthSuccess, mode = 'login', onCancel, userList
             <span className="text-3xl">🏆</span>
           </div>
           <h1 className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-            {getTitle() || '学习任务系统'}
+            {getTitle() || '学习小助手'}
           </h1>
           <p className="text-gray-600 mt-2">
             {mode === 'add' ? '添加新账号' : mode === 'switch' ? '登录其他账号' : isLogin ? '欢迎回来！' : '开始你的学习之旅'}

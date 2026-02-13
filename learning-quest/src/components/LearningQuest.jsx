@@ -400,7 +400,7 @@ export default function LearningQuest({ user, userList = [], onLogout, onAddUser
               <Trophy className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
             </div>
             <h1 className="text-lg sm:text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-              学习任务
+              学习小助手
             </h1>
           </div>
           <div className="flex gap-2 items-center relative" ref={menuRef}>
@@ -1675,7 +1675,7 @@ function CompleteSessionModal({ sessionData, onClose, onComplete }) {
               <span className="text-xl sm:text-2xl font-bold text-blue-600">{duration || '00:00:00'}</span>
             </div>
             <div className="text-xs sm:text-sm text-gray-600 truncate">
-              {task?.title || '学习任务'}
+              {task?.title || '学习小助手'}
             </div>
           </div>
 
