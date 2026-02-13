@@ -865,14 +865,7 @@ function NewTaskModal({ onClose, onAdd }) {
     { value: 'once', label: '仅当天', description: (date) => formatDateChinese(date) },
     { value: 'daily', label: '每天', description: () => '每天重复' },
     { value: 'weekly', label: '每周', description: () => '每周重复' },
-    { value: 'biweekly', label: '每双周', description: () => '每双周重复' },
     { value: 'ebbinghaus', label: '艾宾浩斯', description: () => '记忆曲线复习' },
-    { value: 'week_cross', label: '本周1次跨日任务', description: () => '本周内完成一次' },
-    { value: 'biweek_cross', label: '本双周1次跨日任务', description: () => '本双周内完成一次' },
-    { value: 'month_cross', label: '本月1次跨日任务', description: () => '本月内完成一次' },
-    { value: 'weekly_cross', label: '每周1次跨日任务', description: () => '每周跨日任务' },
-    { value: 'biweekly_cross', label: '每双周1次跨日任务', description: () => '每双周跨日任务' },
-    { value: 'monthly_cross', label: '每月1次跨日任务', description: () => '每月跨日任务' },
   ];
 
   const formatDateChinese = (date) => {

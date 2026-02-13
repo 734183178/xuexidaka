@@ -104,10 +104,9 @@ export default function RedeemCodeModal({ userId, onClose, onSuccess }) {
             <X className="w-5 h-5" />
           </button>
         </div>
-      </div>
 
-      {/* 内容 */}
-      <div className="p-4 sm:p-6">
+        {/* 内容 */}
+        <div className="p-4 sm:p-6">
         {success ? (
           <div className="text-center py-8">
             <CheckCircle className="w-14 h-14 sm:w-16 sm:h-16 text-green-500 mx-auto mb-4" />
@@ -170,10 +169,10 @@ export default function RedeemCodeModal({ userId, onClose, onSuccess }) {
                     </>
                   )}
               </button>
-              </div>
             </form>
           </>
         )}
+      </div>
       </div>
     </div>
   );
